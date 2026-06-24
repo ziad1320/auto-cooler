@@ -22,7 +22,12 @@ set(EXECUTABLE                           ${CMAKE_PROJECT_NAME})
 add_executable(${EXECUTABLE} ${SOURCE_LIST} ${STARTUP_BASE_DIR}/${SERIES_FOLDER}/${MAPPED_DEVICE}.s
         lib/std_types.h
         lib/Bit_Operations.h
-        lib/Utils.h)
+        lib/Utils.h
+        GPIO/GPIO_private.h
+        GPIO/GPIO.h
+        GPIO/GPIO.c
+        Rcc/Rcc_Private.h
+        Rcc/Rcc.h)
 # Include
 target_include_directories(${EXECUTABLE} PUBLIC ${INCLUDE_LIST})
 # Project symbols
