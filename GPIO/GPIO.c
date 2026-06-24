@@ -5,7 +5,7 @@
 #define GPIO_REG(PORT_ID, REG_ID)   ((volatile uint32 *) ((PORT_ID) + (REG_ID)))
 uint32 addressMap[4] = {GPIOA_BASE_ADDR, GPIOB_BASE_ADDR, GPIOC_BASE_ADDR, GPIOD_BASE_ADDR};
 
-void GPIO_Init(uint8 port_name, uint8 pin_number, uint8 pin_mode, uint8 default_state) {
+void Gpio_Init(uint8 port_name, uint8 pin_number, uint8 pin_mode, uint8 default_state) {
     uint32 gpio_index = port_name - GPIO_A;
     GpioType* GpioDevice = (GpioType*) addressMap[gpio_index];
 
@@ -21,7 +21,7 @@ void GPIO_Init(uint8 port_name, uint8 pin_number, uint8 pin_mode, uint8 default_
     }
 }
 
-uint8 GPIO_WritePin(uint8 port_name, uint8 pin_number, uint8 data) {
+uint8 Gpio_WritePin(uint8 port_name, uint8 pin_number, uint8 data) {
     uint8 status = NOK;
     uint32 gpio_index = port_name - GPIO_A;
     GpioType* GpioDevice = (GpioType*) addressMap[gpio_index];
@@ -34,7 +34,7 @@ uint8 GPIO_WritePin(uint8 port_name, uint8 pin_number, uint8 data) {
     return status;
 }
 
-uint8 GPIO_ReadPin(uint8 port_name, uint8 pin_number) {
+uint8 Gpio_ReadPin(uint8 port_name, uint8 pin_number) {
     uint8 data = 0;
     uint32 gpio_index = port_name - GPIO_A;
     GpioType* GpioDevice = (GpioType*) addressMap[gpio_index];
