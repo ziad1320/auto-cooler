@@ -27,7 +27,10 @@ add_executable(${EXECUTABLE} ${SOURCE_LIST} ${STARTUP_BASE_DIR}/${SERIES_FOLDER}
         GPIO/GPIO.h
         GPIO/GPIO.c
         Rcc/Rcc_Private.h
-        Rcc/Rcc.h)
+        Rcc/Rcc.h
+        Lcd/Lcd_private.h
+        Lcd/Lcd.h
+        Lcd/Lcd.c)
 # Include
 target_include_directories(${EXECUTABLE} PUBLIC ${INCLUDE_LIST})
 # Project symbols
