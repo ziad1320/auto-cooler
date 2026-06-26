@@ -1,58 +1,54 @@
 #include "../Rcc/Rcc.h"
 #include "../GPIO/GPIO.h"
-#include "../LCD/Lcd.h"
+#include "../Timer/Timer.h"
 #include "../lib/std_types.h"
 
-/* Simple blocking delay so we can visually see the test sequence */
-void delay_ms(volatile uint32 count) {
-    count *= 1000;
-    while (count--) {
-        __asm("NOP");
-    }
+volatile uint8 async_led_state = LOW;
+
+/* *
+ * THE CALLBACK FUNCTION
+ * The NVIC will jump here automatically when TIM2 finishes counting.
+ */
+void Blink_Callback(void) {
+    // 1. Toggle LED 1 (PA5)
+    async_led_state = (async_led_state == LOW) ? HIGH : LOW;
+    Gpio_WritePin(GPIO_A, 5, async_led_state);
+
+    // 2. Re-trigger the async timer!
+    // Because your driver uses One-Pulse Mode (CR1_OPM), it stops after one run.
+    // We start it again here so it blinks continuously in the background.
+    Timer_DelayMsAsync(TIMER_2, 500, Blink_Callback);
 }
 
 int main(void) {
+    /* 1. CLOCK INITIALIZATION */
     Rcc_Init();
-    Rcc_Enable(RCC_GPIOD);
+    Rcc_Enable(RCC_GPIOA);
+    Rcc_Enable(RCC_TIM2); // Used for Async NVIC test
+    Rcc_Enable(RCC_TIM3); // Used for Sync Blocking test
 
-    Lcd_Init();
+    /* 2. GPIO INITIALIZATION */
+    Gpio_Init(GPIO_A, 5, GPIO_OUTPUT, GPIO_PUSH_PULL);
+    Gpio_Init(GPIO_A, 6, GPIO_OUTPUT, GPIO_PUSH_PULL);
+    Gpio_WritePin(GPIO_A, 5, LOW);
+    Gpio_WritePin(GPIO_A, 6, LOW);
 
+    /* 3. START THE ASYNCHRONOUS TIMER (NVIC Test) */
+    // This tells TIM2 to count to 500ms in the background and then call our function.
+    Timer_DelayMsAsync(TIMER_2, 500, Blink_Callback);
+
+    uint8 sync_led_state = LOW;
+
+    /* 4. THE SUPER LOOP */
     while (1) {
-        // Tests: Lcd_SendString()
-        // Prints starting at Row 0, Col 0 (default after Init/Clear)
-        Lcd_SendString("Testing LCD...");
-        delay_ms(1500);
+        // Toggle LED 2 (PA6)
+        sync_led_state = (sync_led_state == LOW) ? HIGH : LOW;
+        Gpio_WritePin(GPIO_A, 6, sync_led_state);
 
-        // Tests: Lcd_SetCursor()
-        // Move to the beginning of the second line (Row 1, Col 0)
-        Lcd_SetCursor(1, 0);
-
-        // Tests: Lcd_SendChar()
-        // Print "OK!" one character at a time with a small delay
-        Lcd_SendChar('O');
-        delay_ms(300);
-        Lcd_SendChar('K');
-        delay_ms(300);
-        Lcd_SendChar('!');
-        delay_ms(1500);
-
-        // Tests: Lcd_Clear()
-        // Wipes the screen and moves the hidden cursor back to 0,0
-        Lcd_Clear();
-        delay_ms(500);
-
-        // Tests: Lcd_SendCommand()
-        // We will send command 0x0F: Display ON, Cursor ON, Blink ON
-        // This proves the raw command function works by showing a blinking block
-        Lcd_SendCommand(0x0F);
-        Lcd_SendString("Blinking Cursor!");
-        delay_ms(2000);
-
-        // Tests: Lcd_SendCommand() again
-        // Send command 0x0C: Display ON, Cursor OFF, Blink OFF (Back to normal)
-        Lcd_SendCommand(0x0C);
-        Lcd_Clear();
-        delay_ms(500);
+        // Block the CPU for 1000ms (1 second)
+        // You will see PA5 (LED 1) continue to blink 2 times while the CPU
+        // is "stuck" here waiting for PA6 (LED 2) to delay!
+        Timer_DelayMs(TIMER_3, 1000);
     }
 
     return 0;

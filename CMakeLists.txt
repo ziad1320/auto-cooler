@@ -31,7 +31,9 @@ add_executable(${EXECUTABLE} ${SOURCE_LIST} ${STARTUP_BASE_DIR}/${SERIES_FOLDER}
         Lcd/Lcd_private.h
         Lcd/Lcd.h
         Lcd/Lcd.c
-        Nvic/Nvic.h)
+        Nvic/Nvic.h
+        Timer/Timer_Private.h
+        Timer/Timer.h)
 # Include
 target_include_directories(${EXECUTABLE} PUBLIC ${INCLUDE_LIST})
 # Project symbols
