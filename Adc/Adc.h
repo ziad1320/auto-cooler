@@ -62,6 +62,14 @@ void Adc_StopConversion(void);
 void Adc_ConfigSingleChannel_OneShot(uint8 Channel);
 
 /**
+ * @brief  Configure ADC for Single-channel, Continuous conversion mode.
+ * The hardware will automatically start the next conversion
+ * as soon as the previous one finishes.
+ * @param  Channel  ADC_CHANNEL_x
+ */
+void Adc_ConfigSingleChannel_Continuous(uint8 Channel);
+
+/**
  * @brief  (Synchronous) Trigger one conversion and return the result.
  *         Must call Adc_ConfigSingleMode() first.
  * @return Conversion result (12/10/8/6-bit depending on resolution)

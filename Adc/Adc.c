@@ -102,6 +102,31 @@ void Adc_ConfigSingleChannel_OneShot(uint8 Channel)
     SET_BIT(ADC1->CR2, CR2_ADON);
 }
 
+void Adc_ConfigSingleChannel_Continuous(uint8 Channel)
+{
+    /* Disable scan */
+    CLEAR_BIT(ADC1->CR1, CR1_SCAN);
+
+    /* ENABLE continuous mode (Hardware automatically loops) */
+    SET_BIT(ADC1->CR2, CR2_CONT);
+
+    /* EOCS = 1 (Throw an EOC flag after every single conversion) */
+    SET_BIT(ADC1->CR2, CR2_EOCS);
+
+    /* 1 conversion total in the sequence: L = 0 */
+    ADC1->SQR1 &= ~(0x0FUL << 20);
+
+    /* Place the selected channel in SQ1 (bits 4:0 of SQR3) */
+    ADC1->SQR3 &= ~(0x1FUL << 0);
+    ADC1->SQR3 |= (uint32)Channel;
+
+    /* Apply the standard 84-cycle sample time */
+    Adc_SetSampleTime(Channel);
+
+    /* Wake up the ADC */
+    SET_BIT(ADC1->CR2, CR2_ADON);
+}
+
 uint16 Adc_ReadSingleChannel(void)
 {
     /* Wait for EOC */
