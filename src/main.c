@@ -1,10 +1,10 @@
 #include "../Rcc/Rcc.h"
 #include "../GPIO/GPIO.h"
-#include "../Timer/Timer.h"
-#include "../Pwm/Pwm.h"
+#include "../LCD/Lcd.h"
+#include "../Adc/Adc.h"
 #include "../lib/std_types.h"
 
-/* Simple blocking delay so we can see the fade effect */
+// Simple blocking delay
 void delay_ms(volatile uint32 count) {
     count *= 1000;
     while (count--) {
@@ -12,47 +12,71 @@ void delay_ms(volatile uint32 count) {
     }
 }
 
+// Bare-metal helper to convert a number to a string for the LCD
+void IntToString(uint16 num, char* str) {
+    int i = 0;
+    if (num == 0) {
+        str[i++] = '0';
+        str[i] = '\0';
+        return;
+    }
+    char temp[6];
+    int temp_idx = 0;
+    while (num > 0) {
+        temp[temp_idx++] = (num % 10) + '0';
+        num /= 10;
+    }
+    while (temp_idx > 0) {
+        str[i++] = temp[--temp_idx];
+    }
+    str[i] = '\0';
+}
+
 int main(void) {
     /* 1. CLOCK INITIALIZATION */
     Rcc_Init();
     Rcc_Enable(RCC_GPIOA);
-    Rcc_Enable(RCC_TIM2); // Enable clock for Timer 2
+    Rcc_Enable(RCC_GPIOD);
 
-    /* 2. GPIO INITIALIZATION */
-    // For PWM to control a pin, it CANNOT be a standard output.
-    // It MUST be configured as an Alternate Function (AF).
-    // On STM32F401, TIM2_CH1 is mapped to PA0 using Alternate Function 1 (AF1).
-    Gpio_Init(GPIO_A, 0, GPIO_AF, GPIO_PUSH_PULL);
-    Gpio_SetAF(GPIO_A, 0, GPIO_AF1);
+    Rcc_Enable(RCC_ADC1);
 
-    /* 3. PWM INITIALIZATION */
-    // create a 1 kHz PWM signal.
-    // Assuming a 16MHz clock:
-    // Prescaler = 15  --> Timer clock becomes 1MHz (1 tick = 1 microsecond)
-    // AutoReload = 1000 --> 1000 microseconds = 1 millisecond period (1 kHz)
-    Pwm_Init(TIMER_2, PWM_CHANNEL_1, 15, 1000);
+    /* 2. LCD INITIALIZATION */
+    Lcd_Init();
+    Lcd_SetCursor(0, 0);
+    Lcd_SendString("ADC Ch0 Value:");
 
-    // Start the PWM generation on Channel 1
-    Pwm_Start(TIMER_2, PWM_CHANNEL_1);
+    /* 3. GPIO INITIALIZATION */
+    Gpio_Init(GPIO_A, 0, 3, 0);
 
-    int8 duty_cycle = 0;
-    int8 fade_amount = 5; // How much to change the duty cycle each step
+    /* 4. ADC INITIALIZATION */
+    // 12-bit resolution means values will range from 0 (0V) to 4095 (Max Voltage)
+    Adc_Init(ADC_RES_12BIT);
+    Adc_ConfigSingleChannel_OneShot(ADC_CHANNEL_0);
 
-    /* 4. SUPER LOOP */
-    while (1) {
-        // Update the PWM duty cycle
-        Pwm_SetDutyPercent(TIMER_2, PWM_CHANNEL_1, duty_cycle);
+    uint16 adc_value = 0;
+    char display_str[16];
 
-        // Change the duty cycle for the next loop iteration
-        duty_cycle += fade_amount;
+    /* 5. SUPER LOOP */
+    while(1) {
+        // Trigger the hardware to take a voltage reading
+        Adc_StartConversion();
 
-        // Reverse direction at the limits (0% or 100%)
-        if (duty_cycle >= 100 || duty_cycle <= 0) {
-            fade_amount = -fade_amount;
-        }
+        // Wait for the reading to finish and grab the result
+        adc_value = Adc_ReadSingleChannel();
 
-        // Wait 50ms so the human eye can actually see the fade happening
-        delay_ms(50);
+        // Move cursor to the second line of the LCD
+        Lcd_SetCursor(1, 0);
+        Lcd_SendString("Raw: ");
+
+        // Convert the 12-bit number to text and print it
+        IntToString(adc_value, display_str);
+        Lcd_SendString(display_str);
+
+        // Add extra spaces to clear out leftover digits
+        Lcd_SendString("    ");
+
+        // Update the screen 10 times a second
+        delay_ms(100);
     }
 
     return 0;

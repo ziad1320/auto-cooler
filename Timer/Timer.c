@@ -53,7 +53,7 @@ void Timer_DelayMs(uint8 TimerId, uint32 DelayMs) {
     SET_BIT(timer->CR1, CR1_OPM); // One-pulse mode (only excutes the timer I gave him ones not continuous)
     SET_BIT(timer->CR1, CR1_CEN); // Start counting
 
-    while (!READ_BIT(timer->SR, SR_UIF))) { // Update interrupt flag
+    while (!READ_BIT(timer->SR, SR_UIF)) { // Update interrupt flag
         // Poll – CPU is blocked here
     }
 
@@ -92,7 +92,7 @@ static void Timer_HandleIrq(uint8 index) {
     TimerType *timer =(TimerType *)timer_base_addresses[index];
 
 
-    if (READ_BIT(timer->SR, SR_UIF))) {
+    if (READ_BIT(timer->SR, SR_UIF)) {
         timer->SR = 0; // Clear UIF
         CLEAR_BIT(timer->DIER, DIER_UIE); // Disable further IRQs
         CLEAR_BIT(timer->CR1, CR1_CEN); // Stop counter
