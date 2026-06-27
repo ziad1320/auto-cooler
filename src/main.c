@@ -1,82 +1,120 @@
-#include "../Rcc/Rcc.h"
-#include "../GPIO/GPIO.h"
-#include "../LCD/Lcd.h"
-#include "../Adc/Adc.h"
 #include "../lib/std_types.h"
+#include "../Rcc/Rcc.h"
+#include "../GPIO/Gpio.h"
+#include "../Adc/Adc.h"
+#include "../Lcd/Lcd.h"
+#include "../Pwm/Pwm.h"
+#include "../Timer/Timer.h"
+#include "../App/StateMachine.h"
 
-// Simple blocking delay
-void delay_ms(volatile uint32 count) {
-    count *= 1000;
-    while (count--) {
-        __asm("NOP");
-    }
+/* --- Hardware Mapping Definitions --- */
+#define LM35_CHANNEL   ADC_CHANNEL_0
+#define SENSOR_PORT    GPIO_A
+#define SENSOR_PIN     0U
+
+#define FAN_PWM_PORT   GPIO_B
+#define FAN_PWM_PIN    3U
+
+/* --- Global Variables for Async ADC --- */
+volatile uint32 currentTemp = 0;
+volatile uint16 currentRawAdc = 0;
+
+/* --- Callback for Interrupt-Driven ADC --- */
+void Adc_ConversionComplete_Callback(uint16 rawValue) {
+    /* Exact integer math calibrated for 5V hardware simulation */
+    uint32 voltage_mV = (((uint32)rawValue * 5000UL) ) / 4096UL -1;
+
+    currentTemp = voltage_mV / 10;
+    currentRawAdc = rawValue;
+
+    /* Trigger the next ADC conversion so it loops continuously (No CPU Polling) */
+    Adc_StartConversion();
 }
 
-// Bare-metal helper to convert a number to a string for the LCD
-void IntToString(uint16 num, char* str) {
-    int i = 0;
-    if (num == 0) {
-        str[i++] = '0';
-        str[i] = '\0';
-        return;
+/* --- Helper: Format exact Temperature String with Decimal --- */
+void IntToTempString(uint16 rawAdc, char* str) {
+    uint32 voltage_mV = (((uint32)rawAdc * 5000UL) ) / 4096UL -1;
+    uint32 tempInteger = voltage_mV / 10;
+    uint32 tempDecimal = voltage_mV % 10;
+
+    /* Remove leading zero */
+    if (tempInteger < 100) {
+        str[0] = ' ';
+    } else {
+        str[0] = (tempInteger / 100) + '0';
     }
-    char temp[6];
-    int temp_idx = 0;
-    while (num > 0) {
-        temp[temp_idx++] = (num % 10) + '0';
-        num /= 10;
-    }
-    while (temp_idx > 0) {
-        str[i++] = temp[--temp_idx];
-    }
-    str[i] = '\0';
+
+    str[1] = ((tempInteger / 10) % 10) + '0';
+    str[2] = (tempInteger % 10) + '0';
+    str[3] = '.';
+    str[4] = tempDecimal + '0';
+    str[5] = 0xDF; /* Degree Symbol */
+    str[6] = 'C';
+    str[7] = '\0';
 }
 
 int main(void) {
-    /* 1. CLOCK INITIALIZATION */
+    char tempString[10];
+    uint16 lastDisplayedRaw = 0xFFFF; /* Track RAW value to catch every 0.1 decimal change */
+
+    /* 1. Init Clocks */
     Rcc_Init();
     Rcc_Enable(RCC_GPIOA);
-    Rcc_Enable(RCC_GPIOD);
-
+    Rcc_Enable(RCC_GPIOB);
+    Rcc_Enable(RCC_GPIOD); /* LCD Port */
     Rcc_Enable(RCC_ADC1);
+    Rcc_Enable(RCC_TIM2);  /* PWM Port */
 
-    /* 2. LCD INITIALIZATION */
+    /* 2. Init LCD */
     Lcd_Init();
     Lcd_SetCursor(0, 0);
-    Lcd_SendString("ADC Ch0 Value:");
+    Lcd_SendString("Temp: ");
 
-    /* 3. GPIO INITIALIZATION */
-    Gpio_Init(GPIO_A, 0, 3, 0);
+    /* 3. Setup Analog Pin (ADC) for Temperature Sensor */
+    Gpio_Init(SENSOR_PORT, SENSOR_PIN, GPIO_ANALOG, GPIO_PUSH_PULL);
 
-    /* 4. ADC INITIALIZATION */
-    // 12-bit resolution means values will range from 0 (0V) to 4095 (Max Voltage)
+    /* 4. Setup Alternate Function Pin (PWM) for Fan Control */
+    Gpio_Init(FAN_PWM_PORT, FAN_PWM_PIN, GPIO_AF, GPIO_PUSH_PULL);
+    Gpio_SetAF(FAN_PWM_PORT, FAN_PWM_PIN, GPIO_AF1); /* AF1 connects to TIM2 */
+
+    /* 5. Init State Machine & Alarm LED (PA1) */
+    StateMachine_Init();
+
+    /* 6. Init ADC */
     Adc_Init(ADC_RES_12BIT);
-    Adc_ConfigSingleChannel_OneShot(ADC_CHANNEL_0);
+    Adc_ConfigSingleChannel_OneShot(LM35_CHANNEL);
 
-    uint16 adc_value = 0;
-    char display_str[16];
+    /* 7. Init PWM */
+    Pwm_Init(TIMER_2, PWM_CHANNEL_2, 15, 999);
+    Pwm_Start(TIMER_2, PWM_CHANNEL_2);
 
-    /* 5. SUPER LOOP */
+    /* Allow ADC analog circuits to stabilize */
+    for(volatile int i = 0; i < 5000; i++) { __asm("NOP"); }
+
+    /* 8. Start Autonomous Interrupt-Driven ADC Sampling */
+    Adc_ReadSingleChannelAsync(Adc_ConversionComplete_Callback);
+    Adc_StartConversion();
+
+    /* 9. Main Super-Loop (Non-Blocking) */
     while(1) {
-        // Trigger the hardware to take a voltage reading
-        Adc_StartConversion();
 
-        // Wait for the reading to finish and grab the result
-        adc_value = Adc_ReadSingleChannel();
+        /* Capture volatile variables safely */
+        uint32 displayTemp = currentTemp;
+        uint16 displayRaw = currentRawAdc;
 
-        // Move cursor to the second line of the LCD
-        Lcd_SetCursor(1, 0);
-        Lcd_SendString("Raw: ");
+        /* Only execute updates if the exact decimal temperature changed */
+        if (displayRaw != lastDisplayedRaw) {
 
-        // Convert the 12-bit number to text and print it
-        IntToString(adc_value, display_str);
-        Lcd_SendString(display_str);
+            /* Update Top Row of LCD precisely (Main.c handles this to keep decimals) */
+            IntToTempString(displayRaw, tempString);
+            Lcd_SetCursor(0, 6);
+            Lcd_SendString(tempString);
 
-        // Add extra spaces to clear out leftover digits
-        Lcd_SendString("    ");
+            /* * Update Fan, PWM, Alarm LED, and Bottom Row of LCD */
+            StateMachine_Update(displayTemp);
 
-        // Update the screen 10 times a second
-        delay_ms(100);
+            lastDisplayedRaw = displayRaw;
+        }
     }
 
     return 0;
