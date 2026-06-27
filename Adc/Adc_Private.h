@@ -37,7 +37,7 @@ typedef enum {
 #define ADC1_BASE_ADDR          0x40012000UL
 
 /* ADC Common register (shared, only ADC1 on STM32F401) */
-#define ADC_CCR     (*(volatile uint32 *)(ADC1_BASE_ADDR + 0x04UL))
+#define ADC_CCR     (*(volatile uint32 *)(ADC1_BASE_ADDR + 0x304UL))
 
 /*  SR bit positions  */
 #define SR_AWD           0U     /* Analog watchdog flag                   */

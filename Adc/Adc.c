@@ -58,8 +58,8 @@ static void Adc_SetSequence(uint8 Index, uint8 Channel)
 
 void Adc_Init(uint8 Resolution)
 {
-    /* ADC prescaler  PCLK2 / 2  (16 MHz / 2 = 8 MHz ADC clock) */
-    ADC_CCR &= ~(0x03UL << CCR_ADCPRE);
+    /* ADC prescaler PCLK2 / 8  (Crucial to prevent Proteus crashing) */
+    ADC_CCR |= (0x03UL << CCR_ADCPRE);
 
     /* Set resolution (bits 25:24 of CR1) */
     ADC1->CR1 &= ~(0x03UL << CR1_RES);
