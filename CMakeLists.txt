@@ -37,7 +37,8 @@ add_executable(${EXECUTABLE} ${SOURCE_LIST} ${STARTUP_BASE_DIR}/${SERIES_FOLDER}
         Pwm/Pwm.h
         Adc/Adc_Private.h
         Adc/Adc.h
-        App/StateMachine.h)
+        App/StateMachine.h
+        Usart/Usart.h)
 # Include
 target_include_directories(${EXECUTABLE} PUBLIC ${INCLUDE_LIST})
 # Project symbols
