@@ -4,3 +4,5 @@ cmake-build-*/
 build*/
 *.zip
 Project Backups/
+*.workspace
+*.log
