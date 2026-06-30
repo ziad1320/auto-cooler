@@ -54,15 +54,15 @@ void IntToTempString(uint16 rawAdc, char* str) {
     str[7] = '\0';
 }
 
-/* Helper to convert raw integer to string for UART logging safely */
-void IntToString(uint16 num, char* str) {
+/* Helper to convert raw integer (Time) to string for UART logging safely */
+void IntToString(uint32 num, char* str) {
     int i = 0;
     if (num == 0) {
         str[i++] = '0';
         str[i] = '\0';
         return;
     }
-    char temp[6];
+    char temp[12];
     int temp_idx = 0;
     while (num > 0) {
         temp[temp_idx++] = (num % 10) + '0';
@@ -74,23 +74,39 @@ void IntToString(uint16 num, char* str) {
     str[i] = '\0';
 }
 
-/* helper to format and send a CSV log over USB */
-void LogDataToPC(uint16 rawAdc, const char* tempString) {
-    char rawStr[6];
+/* helper to format and send a clean log over USB */
+void LogDataToPC(uint32 timeSec, const char* tempString, uint32 tempInt) {
+    char timeStr[12];
+    IntToString(timeSec, timeStr);
 
-    /* Safely format just the raw integer without overflowing the buffer */
-    IntToString(rawAdc, rawStr);
-
-    // Print in CSV format: [Raw_ADC], [Formatted_Temp]
-    Usart2_TransmitString(rawStr);
-    Usart2_TransmitString(", ");
+    /* Print Format: [Time] Temp: XX.X°C | Fan: XX% STATE */
+    Usart2_TransmitString("[");
+    Usart2_TransmitString(timeStr);
+    Usart2_TransmitString("s] Temp: ");
     Usart2_TransmitString(tempString);
+    Usart2_TransmitString(" | Fan: ");
+
+    /* Match these thresholds to your StateMachine.c logic! */
+    if (tempInt >= 40) {
+        Usart2_TransmitString("100% OVERHEAT");
+    } else if (tempInt >= 30) {
+        Usart2_TransmitString("66% NORMAL");
+    } else if (tempInt >= 25) {
+        Usart2_TransmitString("33% COOLING");
+    } else {
+        Usart2_TransmitString("0% OFF");
+    }
+
     Usart2_TransmitString("\r\n"); // Carriage Return + Line Feed
 }
 
 int main(void) {
     char tempString[10];
-    uint16 lastDisplayedRaw = 0xFFFF; /* Track RAW value to catch every 0.1 decimal change */
+    uint16 lastDisplayedRaw = 0xFFFF;
+
+    /* Variables for our 5-second Software Timer */
+    uint32 tickCounter = 0;
+    uint32 secondsElapsed = 0;
 
     /* 1. Init Clocks */
     Rcc_Init();
@@ -99,8 +115,6 @@ int main(void) {
     Rcc_Enable(RCC_GPIOD); /* LCD Port */
     Rcc_Enable(RCC_ADC1);
     Rcc_Enable(RCC_TIM2);  /* PWM Port */
-
-    /* ADDED: Enable USART2 Clock */
     Rcc_Enable(RCC_USART2);
 
     /* 2. Init LCD */
@@ -126,9 +140,9 @@ int main(void) {
     Pwm_Init(TIMER_2, PWM_CHANNEL_2, 15, 999);
     Pwm_Start(TIMER_2, PWM_CHANNEL_2);
 
-    /* ADDED: Init USART2 and Print the CSV Header */
+    /* Init USART2 and Print the Header */
     Usart2_Init();
-    Usart2_TransmitString("Raw_ADC, Temperature\r\n");
+    Usart2_TransmitString("\r\n--- SYSTEM BOOT ---\r\n");
 
     /* Allow ADC analog circuits to stabilize */
     for(volatile int i = 0; i < 5000; i++) { __asm("NOP"); }
@@ -144,22 +158,40 @@ int main(void) {
         uint32 displayTemp = currentTemp;
         uint16 displayRaw = currentRawAdc;
 
-        /* Only execute updates if the exact decimal temperature changed */
+        /* ANTI-JITTER: Only execute LCD updates if the exact temperature changed */
         if (displayRaw != lastDisplayedRaw) {
 
-            /* Update Top Row of LCD precisely (Main.c handles this to keep decimals) */
+            /* Update Top Row of LCD precisely */
             IntToTempString(displayRaw, tempString);
             Lcd_SetCursor(0, 6);
             Lcd_SendString(tempString);
 
-            /* * Update Fan, PWM, Alarm LED, and Bottom Row of LCD */
+            /* Update Fan, PWM, Alarm LED, and Bottom Row of LCD */
             StateMachine_Update(displayTemp);
-
-            /* ADDED: Log the data to the PC whenever a change happens */
-            LogDataToPC(displayRaw, tempString);
 
             lastDisplayedRaw = displayRaw;
         }
+
+        /* PACING DELAY (Roughly 50ms per loop in Proteus) */
+        for (volatile uint32 d = 0; d < 20000; d++) { __asm("NOP"); }
+
+        /* THE 5-SECOND LOGGER */
+        /* If 1 loop is ~50ms, then 100 loops = ~5 seconds */
+        tickCounter++;
+        if (tickCounter >= 100) {
+            tickCounter = 0;
+            secondsElapsed += 2;
+
+            /* We must re-format the string here just in case the LCD
+             * hasn't updated it recently due to the anti-jitter filter */
+            char logString[10];
+            IntToTempString(displayRaw, logString);
+
+            LogDataToPC(secondsElapsed, logString, displayTemp);
+        }
+
+        /* Trigger Next Reading */
+        Adc_StartConversion();
     }
 
     return 0;
