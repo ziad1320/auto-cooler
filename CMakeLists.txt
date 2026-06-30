@@ -38,7 +38,9 @@ add_executable(${EXECUTABLE} ${SOURCE_LIST} ${STARTUP_BASE_DIR}/${SERIES_FOLDER}
         Adc/Adc_Private.h
         Adc/Adc.h
         App/StateMachine.h
-        Usart/Usart.h)
+        Usart/Usart.h
+        App/Logger.h
+        App/Logger.c)
 # Include
 target_include_directories(${EXECUTABLE} PUBLIC ${INCLUDE_LIST})
 # Project symbols

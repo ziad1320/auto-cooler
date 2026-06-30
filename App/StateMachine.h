@@ -17,4 +17,10 @@ void StateMachine_Init(void);
 /* Feed the current temperature into the state machine to trigger logic */
 void StateMachine_Update(uint32 currentTemp);
 
+/* Returns the current state of the fan as a string (e.g., "33% COOLING") */
+const char* StateMachine_GetStateString(void);
+
+/* Formats the raw ADC value into a proper temperature string for LCD/UART */
+void StateMachine_FormatTempString(uint16 rawAdc, char* str);
+
 #endif

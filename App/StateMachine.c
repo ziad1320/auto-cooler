@@ -8,6 +8,8 @@
 #define ALARM_PORT GPIO_A
 #define ALARM_PIN  1
 
+static const char* currentStateText = "0% OFF";
+
 /* The mutually exclusive events based on Temperature Thresholds */
 typedef enum {
     EVENT_TEMP_LOW = 0,    /* T < 25 */
@@ -23,7 +25,7 @@ static SystemState_t CurrentState = STATE_IDLE;
 typedef SystemState_t (*StateHandler_t)(uint32 temp);
 
 /* ========================================================================= */
-/*                           PRIVATE HELPER LOGIC                            */
+/* PRIVATE HELPER LOGIC                            */
 /* ========================================================================= */
 
 /* Generates an Event based on the raw temperature */
@@ -44,27 +46,27 @@ static uint8 CalculateDiscreteDutyCycle(uint32 temp) {
 /* LCD UI Helper */
 static void UpdateDisplay(uint32 temp, uint8 duty, const char* stateStr) {
     char str[16];
-    
+
     /* Update Line 2: Fan and State */
     uint8 idx = 0;
     str[idx++] = 'F'; str[idx++] = 'a'; str[idx++] = 'n'; str[idx++] = ':';
-    
+
     if (duty >= 100) { str[idx++] = '1'; str[idx++] = '0'; str[idx++] = '0'; }
     else if (duty >= 10) { str[idx++] = (duty / 10) + '0'; str[idx++] = (duty % 10) + '0'; }
     else { str[idx++] = duty + '0'; }
     str[idx++] = '%';
-    
+
     uint8 s = 0;
     while(stateStr[s] != '\0') { str[idx++] = stateStr[s++]; }
     while (idx < 15) { str[idx++] = ' '; } /* Clear trailing chars */
     str[15] = '\0';
-    
+
     Lcd_SetCursor(1, 0);
     Lcd_SendString(str);
 }
 
 /* ========================================================================= */
-/*                          STATE TRANSITION HANDLERS                        */
+/* STATE TRANSITION HANDLERS                        */
 /* ========================================================================= */
 
 static SystemState_t Action_GoIdle(uint32 temp) {
@@ -90,39 +92,74 @@ static SystemState_t Action_GoOverheat(uint32 temp) {
 }
 
 static SystemState_t Action_OverheatToCooling(uint32 temp) {
-    return Action_GoCooling(temp); 
+    return Action_GoCooling(temp);
 }
 
 /* ========================================================================= */
-/*                     THE 2D FUNCTION POINTER MATRIX                        */
+/* THE 2D FUNCTION POINTER MATRIX                        */
 /* ========================================================================= */
 
 static const StateHandler_t StateMachineMatrix[NUM_STATES][NUM_EVENTS] = {
-    /*                   EVENT_TEMP_LOW      EVENT_TEMP_NORMAL     EVENT_TEMP_HIGH */
+    /* EVENT_TEMP_LOW      EVENT_TEMP_NORMAL     EVENT_TEMP_HIGH */
     /* IDLE     */      {Action_GoIdle,      Action_GoCooling,     Action_GoOverheat},
     /* COOLING  */      {Action_GoIdle,      Action_GoCooling,     Action_GoOverheat},
     /* OVERHEAT */      {Action_GoIdle, Action_OverheatToCooling, Action_GoOverheat}
 };
 
 /* ========================================================================= */
-/*                               PUBLIC API                                  */
+/* PUBLIC API                                  */
 /* ========================================================================= */
 
 void StateMachine_Init(void) {
     /* Initialize the Alarm LED on PA1 */
     Gpio_Init(ALARM_PORT, ALARM_PIN, GPIO_OUTPUT, GPIO_PUSH_PULL);
     Gpio_WritePin(ALARM_PORT, ALARM_PIN, LOW);
-    
+
     CurrentState = STATE_IDLE;
 }
 
 void StateMachine_Update(uint32 currentTemp) {
     /* 1. Determine the current Event */
     SystemEvent_t currentEvent = GetEvent(currentTemp);
-    
+
     /* 2. Execute the specific Mealy transition function using the 2D Matrix */
     StateHandler_t transitionFunc = StateMachineMatrix[CurrentState][currentEvent];
-    
+
     /* 3. Update the Current State based on the function's return value */
     CurrentState = transitionFunc(currentTemp);
+
+    /* 4. Update the text state for the UART Logger based on Duty Cycle thresholds */
+    if (currentTemp >= 40) {
+        currentStateText = "100% OVERHEAT";
+    }else if (currentTemp >= 35) {
+        currentStateText = "100% COOLING";
+    }else if (currentTemp >= 30) {
+        currentStateText = "66% COOLING";
+    } else if (currentTemp >= 25) {
+        currentStateText = "33% COOLING";
+    } else {
+        currentStateText = "0% IDLE";
+    }
+}
+
+const char* StateMachine_GetStateString(void) {
+    return currentStateText;
+}
+
+void StateMachine_FormatTempString(uint16 rawAdc, char* str) {
+    /* Safely dividing by 4095 without the -1 to prevent mathematical underflow */
+    uint32 voltage_mV = (((uint32)rawAdc * 5000UL) ) / 4096UL - 1;
+    uint32 tempInteger = voltage_mV / 10;
+    uint32 tempDecimal = voltage_mV % 10;
+
+    if (tempInteger < 100) { str[0] = ' '; }
+    else { str[0] = (tempInteger / 100) + '0'; }
+
+    str[1] = ((tempInteger / 10) % 10) + '0';
+    str[2] = (tempInteger % 10) + '0';
+    str[3] = '.';
+    str[4] = tempDecimal + '0';
+    str[5] = '\xDF';
+    str[6] = 'C';
+    str[7] = '\0';
 }
