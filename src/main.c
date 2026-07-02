@@ -10,25 +10,34 @@
 
 /* --- Hardware Mapping Definitions --- */
 #define SENSOR_PORT    GPIO_A
+
 #define FAN_PWM_PORT   GPIO_B
 #define FAN_PWM_PIN    3U
 
+#define LED_PORT       GPIO_B
+uint8 led_pins[NUM_SENSORS] = {4U, 5U, 6U, 7U}; /* PB4, PB5, PB6, PB7 */
+
 /* --- Logging Step Configuration --- */
 #define LOG_INTERVAL_SECONDS  2
-#define LOOPS_PER_SECOND      20
+#define LOOPS_PER_SECOND      10  /* 10 loops of 100ms hardware delay = 1 second */
 #define LOG_TICK_THRESHOLD    (LOG_INTERVAL_SECONDS * LOOPS_PER_SECOND)
 
 /* --- Global Variables for Async ADC Array --- */
 volatile uint16 currentRawAdcArray[NUM_SENSORS] = {0};
 uint8 sensorChannels[NUM_SENSORS] = {ADC_CHANNEL_0, ADC_CHANNEL_4, ADC_CHANNEL_5, ADC_CHANNEL_6};
+volatile uint8 currentSensorIndex = 0;
 
-/* FIX 1: Callback matches the 2-parameter signature expected by AdcMultiChannelCallback */
-void Adc_GroupConversionComplete_Callback(uint16* rawValues, uint8 numChannels) {
-    /* The ADC ISR already wrote the data directly into currentRawAdcArray. */
-    /* We just re-trigger the group scan so it constantly runs in the background. */
+/* The standard ADC ISR for Round-Robin Polling */
+void Adc_ConversionComplete_Callback(uint16 rawValue) {
+    currentRawAdcArray[currentSensorIndex] = rawValue;
 
-    /* FIX 2: Pass the Results buffer, not the sensorChannels! */
-    Adc_ScanChannelGroupAsync((uint16*)currentRawAdcArray, NUM_SENSORS, Adc_GroupConversionComplete_Callback);
+    currentSensorIndex++;
+    if(currentSensorIndex >= NUM_SENSORS) {
+        currentSensorIndex = 0;
+    }
+
+    Adc_ConfigSingleChannel_OneShot(sensorChannels[currentSensorIndex]);
+    Adc_StartConversion();
 }
 
 int main(void) {
@@ -42,7 +51,8 @@ int main(void) {
     Rcc_Enable(RCC_GPIOB);
     Rcc_Enable(RCC_GPIOD);
     Rcc_Enable(RCC_ADC1);
-    Rcc_Enable(RCC_TIM2);
+    Rcc_Enable(RCC_TIM2);   /* For PWM */
+    Rcc_Enable(RCC_TIM3);   /* For Hardware Delay */
     Rcc_Enable(RCC_USART2);
 
     /* 2. Init LCD & GPIO */
@@ -55,6 +65,11 @@ int main(void) {
     Gpio_Init(SENSOR_PORT, 5U, GPIO_ANALOG, GPIO_PUSH_PULL);
     Gpio_Init(SENSOR_PORT, 6U, GPIO_ANALOG, GPIO_PUSH_PULL);
 
+    /* Initialize all 4 LED pins as Output */
+    for(uint8 i = 0; i < NUM_SENSORS; i++) {
+        Gpio_Init(LED_PORT, led_pins[i], GPIO_OUTPUT, GPIO_PUSH_PULL);
+    }
+
     Gpio_Init(FAN_PWM_PORT, FAN_PWM_PIN, GPIO_AF, GPIO_PUSH_PULL);
     Gpio_SetAF(FAN_PWM_PORT, FAN_PWM_PIN, GPIO_AF1);
 
@@ -65,23 +80,37 @@ int main(void) {
     /* 4. Init Peripherals */
     Adc_Init(ADC_RES_12BIT);
 
-    /* FIX 3: Configure the ADC multiplexer sequence BEFORE starting the scan */
-    Adc_ConfigScanGroup_Continuous(sensorChannels, NUM_SENSORS);
-
     Pwm_Init(TIMER_2, PWM_CHANNEL_2, 15, 999);
     Pwm_Start(TIMER_2, PWM_CHANNEL_2);
 
-    for(volatile int i = 0; i < 5000; i++) { __asm("NOP"); }
+    /* Initial boot delay using Hardware Timer instead of NOPs */
+    Timer_DelayMs(TIMER_3, 200);
 
-    /* 5. Start Autonomous ADC Group Sampling */
-    Adc_ScanChannelGroupAsync((uint16*)currentRawAdcArray, NUM_SENSORS, Adc_GroupConversionComplete_Callback);
+    /* 5. Start Autonomous ADC Round-Robin Sampling */
+    currentSensorIndex = 0;
+    Adc_ConfigSingleChannel_OneShot(sensorChannels[currentSensorIndex]);
+    Adc_ReadSingleChannelAsync(Adc_ConversionComplete_Callback);
+    Adc_StartConversion();
 
     /* 6. Main Super-Loop */
     while(1) {
 
-        /* Step A: Find the Maximum Temperature to drive the Fan State Machine */
+        /* Step A: Find the Maximum Temperature & Update LEDs */
         uint16 maxRawAdc = 0;
         for(uint8 i = 0; i < NUM_SENSORS; i++) {
+
+            /* Calculate Celsius for the specific sensor */
+            uint32 voltage_mV = (((uint32)currentRawAdcArray[i] * 5000UL) ) / 4096UL - 1;
+            uint32 tempC = voltage_mV / 10;
+
+            /* Warning LED Logic (> 40C) */
+            if(tempC > 40) {
+                Gpio_WritePin(LED_PORT, led_pins[i], HIGH);
+            } else {
+                Gpio_WritePin(LED_PORT, led_pins[i], LOW);
+            }
+
+            /* Find maximum temperature */
             if(currentRawAdcArray[i] > maxRawAdc) {
                 maxRawAdc = currentRawAdcArray[i];
             }
@@ -95,7 +124,6 @@ int main(void) {
         StateMachine_Update(maxTemp);
 
         /* Step B: LCD Sequential Display Logic */
-        /* Changes which sensor is displayed every 2 seconds */
         uint8 displayIndex = (secondsElapsed / 2) % NUM_SENSORS;
 
         StateMachine_FormatTempString(currentRawAdcArray[displayIndex], tempString);
@@ -104,10 +132,10 @@ int main(void) {
         Lcd_SendChar(displayIndex + '1');
         Lcd_SendString(": ");
         Lcd_SendString(tempString);
-        Lcd_SendString("  "); /* Padding to clear leftover characters */
+        Lcd_SendString("  "); /* Padding */
 
-        /* PACING DELAY (~50ms) */
-        for (volatile uint32 d = 0; d < 20000; d++) { __asm("NOP"); }
+        /* PACING DELAY (Exactly 100ms hardware block, bypassing Proteus speed issues) */
+        Timer_DelayMs(TIMER_3, 100);
 
         /* LOGGER SOFTWARE TIMER */
         tickCounter++;
