@@ -3,12 +3,14 @@
 
 #include "../lib/std_types.h"
 
+#define NUM_SENSORS 4
+
 void Logger_Init(void);
 
-/* Original Format: [5s] Temp: 25.0°C | Fan: 33% COOLING */
-void Logger_LogData_Seconds(uint32 timeSec, uint16 rawAdc);
+/* Original Format */
+void Logger_LogData_Seconds(uint32 timeSec, uint16* rawAdcArray);
 
-/* Real-Time Format: [00:00:05] Temp: 25.0°C | Fan: 33% COOLING */
-void Logger_LogData_HMS(uint32 timeSec, uint16 rawAdc);
+/* Real-Time Format: [00:00:05] S1:25C | S2:26C | S3:24C | S4:41C | Fan: 100% OVERHEAT */
+void Logger_LogData_HMS(uint32 timeSec, uint16* rawAdcArray);
 
 #endif
